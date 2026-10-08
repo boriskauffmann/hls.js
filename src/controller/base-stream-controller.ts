@@ -1039,6 +1039,7 @@ export default class BaseStreamController
           );
           this.nextLoadPosition = part.start + part.duration;
           this.state = State.FRAG_LOADING;
+          const request = ++this.loadRequest;
           let result: Promise<PartsLoadedData | FragLoadedData | null>;
           const initDataPromise = this.loadInitSegmentIfNeeded(frag);
           if (keyLoadingPromise || initDataPromise) {
@@ -1059,14 +1060,16 @@ export default class BaseStreamController
                   progressCallback,
                 );
               })
-              .catch((error) => this.handleFragLoadError(error));
+              .catch((error) => this.handleFragLoadError(error, request));
           } else {
             result = this.doFragPartsLoad(
               frag,
               part,
               level,
               progressCallback,
-            ).catch((error: LoadError) => this.handleFragLoadError(error));
+            ).catch((error: LoadError) =>
+              this.handleFragLoadError(error, request),
+            );
           }
           this.hls.trigger(Events.FRAG_LOADING, {
             frag,
@@ -1129,6 +1132,7 @@ export default class BaseStreamController
       this.nextLoadPosition = frag.start + frag.duration;
     }
     this.state = State.FRAG_LOADING;
+    const request = ++this.loadRequest;
 
     // Load key before streaming fragment data
     const dataOnProgress =
@@ -1148,7 +1152,7 @@ export default class BaseStreamController
             initDataPromise,
           );
         })
-        .catch((error) => this.handleFragLoadError(error));
+        .catch((error) => this.handleFragLoadError(error, request));
     } else {
       // load unencrypted fragment data with progress event,
       // or handle fragment result after key and fragment are finished loading
@@ -1168,7 +1172,7 @@ export default class BaseStreamController
           }
           return fragLoadedData;
         })
-        .catch((error) => this.handleFragLoadError(error));
+        .catch((error) => this.handleFragLoadError(error, request));
     }
     this.hls.trigger(Events.FRAG_LOADING, { frag, targetBufferTime });
     if (this.fragCurrent === null) {
@@ -1219,11 +1223,23 @@ export default class BaseStreamController
     );
   }
 
+  private loadRequest: number = 0;
+
   private handleFragLoadError(
     error: LoadError | Error | (Error & { data: ErrorData }),
+    request?: number,
   ) {
     if ('data' in error) {
       const data = error.data;
+      if (
+        request !== undefined &&
+        request !== this.loadRequest &&
+        data.details === ErrorDetails.INTERNAL_ABORTED
+      ) {
+        // This request was aborted by the one that replaced it. Resetting the loading state now would
+        // have the request in flight (same fragment, when loading parts) aborted and repeated on every tick.
+        return null;
+      }
       if (data.frag && data.details === ErrorDetails.INTERNAL_ABORTED) {
         this.handleFragLoadAborted(data.frag, data.part);
       } else if (
