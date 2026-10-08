@@ -96,6 +96,9 @@ function timelineMessage(label: string, time: number) {
   return `[${label}] Advancing timeline position to ${time}`;
 }
 
+// Asset durations within this distance of their asset-list DURATION are not adjusted when appending in place
+const IN_PLACE_DURATION_TOLERANCE_SECONDS = 0.25;
+
 export default class InterstitialsController
   extends Logger
   implements NetworkComponentAPI
@@ -2048,7 +2051,9 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         );
         const skipSeekToStartPosition = true;
         this.attachPrimary(flushStart, null, skipSeekToStartPosition);
-        this.flushFrontBuffer(flushStart);
+        // Interstitial media appended in place past the new end must be removed even when the live
+        // primary playlist has not reached it yet, or it plays on past the resumption point.
+        this.flushFrontBuffer(flushStart, true);
       }
     }
   }
@@ -2433,14 +2438,14 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     return null;
   }
 
-  private flushFrontBuffer(startOffset: number) {
+  private flushFrontBuffer(startOffset: number, pastPrimaryEdge?: boolean) {
     // Force queued flushing of all buffers
     const requiredTracks = this.requiredTracks;
     if (!requiredTracks) {
       return;
     }
     const details = this.primaryDetails;
-    if (details && startOffset >= details.edge) {
+    if (!pastPrimaryEdge && details && startOffset >= details.edge) {
       return;
     }
     this.log(`Removing front buffer starting at ${startOffset}`);
@@ -2602,10 +2607,19 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       // Get time at end of last fragment
       const duration = details.edge - details.fragmentStart;
       const currentAssetDuration = assetItem.duration;
+      // Assets appended in place are spaced by their duration. Growing it by the few milliseconds that
+      // one track runs longer than the asset-list DURATION leaves a hole in the other track's buffer
+      // before the next asset, and moves the timeline offset of every asset player that follows.
+      const growth = duration - (currentAssetDuration || 0);
+      const keepDuration =
+        currentAssetDuration !== null &&
+        interstitial.appendInPlace &&
+        Math.abs(growth) < IN_PLACE_DURATION_TOLERANCE_SECONDS;
       if (
-        initialDuration ||
-        currentAssetDuration === null ||
-        duration > currentAssetDuration
+        !keepDuration &&
+        (initialDuration ||
+          currentAssetDuration === null ||
+          duration > currentAssetDuration)
       ) {
         initialDuration = false;
         this.log(
@@ -2681,7 +2695,13 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
         this.onTimeupdate();
         this.checkBuffer(true);
         return;
-      } else if (data.details === ErrorDetails.BUFFER_SEEK_OVER_HOLE) {
+      } else if (
+        data.details === ErrorDetails.BUFFER_SEEK_OVER_HOLE ||
+        ((data.details === ErrorDetails.BUFFER_NUDGE_ON_STALL ||
+          data.details === ErrorDetails.INTERNAL_ABORTED) &&
+          !data.fatal)
+      ) {
+        // gap-controller recovered playback or a request was replaced: not an asset failure
         return;
       }
       this.handleAssetItemError(
