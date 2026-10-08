@@ -233,6 +233,7 @@ export function mergeDetails(
     });
   }
 
+  let programDateTimes: MediaFragment[] | undefined;
   if (newDetails.skippedSegments) {
     newDetails.deltaUpdateFailed = newFragments.some((frag) => !frag as any);
     if (newDetails.deltaUpdateFailed) {
@@ -251,7 +252,7 @@ export function mergeDetails(
           logger,
         );
       }
-      const programDateTimes = oldDetails.fragments.filter(
+      programDateTimes = oldDetails.fragments.filter(
         (frag) => frag.rawProgramDateTime,
       );
       if (oldDetails.hasProgramDateTime && !newDetails.hasProgramDateTime) {
@@ -265,7 +266,6 @@ export function mergeDetails(
           }
         }
       }
-      mapDateRanges(programDateTimes, newDetails);
     }
     newDetails.endCC = newFragments[newFragments.length - 1].cc;
   }
@@ -308,6 +308,19 @@ export function mergeDetails(
     // also adjust sliding in case delta is 0 (we could have old=[50-60] and new=old=[50-61])
     // in that case we also need to adjust start offset of all fragments
     adjustSliding(oldDetails, newDetails);
+  }
+
+  if (programDateTimes) {
+    // Map DateRanges once fragment start times are aligned with the previous details,
+    // including segments (and the fragment hint) added by this delta update.
+    const previousEndSN = oldDetails.endSN;
+    for (let i = 0; i < fragmentsToCheck.length; i++) {
+      const frag = fragmentsToCheck[i];
+      if (frag.rawProgramDateTime && frag.sn > previousEndSN) {
+        programDateTimes.push(frag);
+      }
+    }
+    mapDateRanges(programDateTimes, newDetails);
   }
 
   if (newFragments.length) {

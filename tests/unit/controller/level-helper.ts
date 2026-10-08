@@ -326,6 +326,74 @@ expect: ${JSON.stringify(merged.fragments[i])}`,
       expect(newPlaylist.playlistParsingError).to.be.null;
     });
 
+    it('maps a date range that starts at the end of a segment added by a delta Playlist update to that segment', function () {
+      const playlist = `#EXTM3U
+#EXT-X-TARGETDURATION:6
+#EXT-X-VERSION:9
+#EXT-X-MEDIA-SEQUENCE:1
+#EXT-X-SERVER-CONTROL:CAN-SKIP-UNTIL=36.0,CAN-SKIP-DATERANGES=YES,CAN-BLOCK-RELOAD=YES,HOLDBACK=18,PART-HOLDBACK=3
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:00.000Z
+#EXTINF:6,
+fileSequence1.ts
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:06.000Z
+#EXTINF:6,
+fileSequence2.ts
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:12.000Z
+#EXTINF:6,
+fileSequence3.ts
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:18.000Z
+#EXTINF:6,
+fileSequence4.ts
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:24.000Z
+#EXTINF:6,
+fileSequence5.ts
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:30.000Z
+#EXTINF:6,
+fileSequence6.ts
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:36.000Z
+#EXTINF:6,
+fileSequence7.ts
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:42.000Z
+#EXTINF:6,
+fileSequence8.ts`;
+      const playlistUpdate = `#EXTM3U
+#EXT-X-TARGETDURATION:6
+#EXT-X-VERSION:9
+#EXT-X-MEDIA-SEQUENCE:2
+#EXT-X-SERVER-CONTROL:CAN-SKIP-UNTIL=36.0,CAN-SKIP-DATERANGES=YES,CAN-BLOCK-RELOAD=YES,HOLDBACK=18,PART-HOLDBACK=3
+#EXT-X-SKIP:SKIPPED-SEGMENTS=3
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:24.000Z
+#EXTINF:6,
+fileSequence5.ts
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:30.000Z
+#EXTINF:6,
+fileSequence6.ts
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:36.000Z
+#EXTINF:6,
+fileSequence7.ts
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:42.000Z
+#EXTINF:6,
+fileSequence8.ts
+#EXT-X-PROGRAM-DATE-TIME:2024-02-29T12:00:48.000Z
+#EXTINF:6,
+fileSequence9.ts
+#EXT-X-DATERANGE:ID="ad",CLASS="com.apple.hls.interstitial",START-DATE="2024-02-29T12:00:54.000Z",DURATION=30,X-ASSET-LIST="https://example.com/ad.json"`;
+      const details = parseLevelPlaylist(playlist);
+      const detailsUpdated = parseLevelPlaylist(playlistUpdate);
+      mergeDetails(details, detailsUpdated, logger);
+      expect(detailsUpdated.deltaUpdateFailed, 'deltaUpdateFailed').to.be.false;
+      const dateRange = detailsUpdated.dateRanges.ad!;
+      expect(dateRange, 'date range').to.be.an('object');
+      expect(dateRange.startTime, 'startTime').to.equal(54);
+      // The date range begins where the newest segment (9) ends. It must be anchored to that segment,
+      // not to the last segment of the previous playlist (8), so that its start is seen as segment aligned.
+      expect(dateRange.tagAnchor, 'tagAnchor').to.include({
+        sn: 9,
+        start: 48,
+        duration: 6,
+      });
+    });
+
     it('handles delta Playlist updates with merged program date time and skipped date ranges', function () {
       const playlist = `#EXTM3U
 #EXT-X-TARGETDURATION:6
