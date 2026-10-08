@@ -2219,6 +2219,78 @@ media_w507366714_268.ts`;
       expect(interstitials.playingIndex).to.equal(0, 'playingIndex b');
       expect(interstitials.primary.currentTime).to.equal(0, 'timelinePos b');
     });
+    it('keeps the append strategy asset players were created with when a playlist update aligns the interstitial start', function () {
+      // Interstitial scheduled ahead of the live edge: its start segment is not in the playlist yet
+      const playlist = `#EXTM3U
+#EXT-X-TARGETDURATION:10
+#EXT-X-VERSION:7
+#EXT-X-MEDIA-SEQUENCE:1
+#EXT-X-PROGRAM-DATE-TIME:2024-02-23T15:00:00.000Z
+#EXT-X-MAP:URI="fileSequence0.mp4"
+#EXTINF:10,	
+fileSequence1.mp4
+#EXTINF:10,	
+fileSequence2.mp4
+#EXTINF:10,	
+fileSequence3.mp4
+#EXTINF:10,	
+fileSequence4.mp4
+#EXT-X-DATERANGE:ID="ahead",CLASS="com.apple.hls.interstitial",START-DATE="2024-02-23T15:00:50.000Z",DURATION=30,X-ASSET-LIST="https://example.com/ahead.json"`;
+      const playlistUpdate = `#EXTM3U
+#EXT-X-TARGETDURATION:10
+#EXT-X-VERSION:7
+#EXT-X-MEDIA-SEQUENCE:1
+#EXT-X-PROGRAM-DATE-TIME:2024-02-23T15:00:00.000Z
+#EXT-X-MAP:URI="fileSequence0.mp4"
+#EXTINF:10,	
+fileSequence1.mp4
+#EXTINF:10,	
+fileSequence2.mp4
+#EXTINF:10,	
+fileSequence3.mp4
+#EXTINF:10,	
+fileSequence4.mp4
+#EXTINF:10,	
+fileSequence5.mp4
+#EXTINF:10,	
+fileSequence6.mp4
+#EXT-X-DATERANGE:ID="ahead",CLASS="com.apple.hls.interstitial",START-DATE="2024-02-23T15:00:50.000Z",DURATION=30,X-ASSET-LIST="https://example.com/ahead.json"`;
+
+      setLoadedLevelDetails(playlist);
+      const interstitials = interstitialsController.interstitialsManager;
+      if (!interstitials) {
+        expect(interstitials, 'interstitialsManager').to.be.an('object');
+        return;
+      }
+      attachMediaToHls();
+      const interstitial = interstitials.events[0];
+      expect(interstitial.startTime, 'startTime').to.equal(50);
+      expect(interstitial.appendInPlace, 'appendInPlace before update').to.be
+        .false;
+
+      // Asset players are created without a timeline offset
+      hls.trigger.resetHistory();
+      interstitial.assetListResponse = {
+        ASSETS: [{ URI: 'https://example.com/ahead.m3u8', DURATION: '30' }],
+      };
+      hls.trigger(Events.ASSET_LIST_LOADED, {
+        event: interstitial,
+        assetListResponse: interstitial.assetListResponse,
+        networkDetails: new Response('ok'),
+      });
+      expect(getTriggerCalls(), 'Actual events after asset-list').to.include(
+        Events.INTERSTITIAL_ASSET_PLAYER_CREATED,
+      );
+
+      // Playlist update adds the segment that starts at the interstitial START-DATE
+      setLoadedLevelDetails(playlistUpdate);
+      expect(interstitials.events[0], 'same event').to.equal(interstitial);
+      expect(interstitial.startTime, 'startTime after update').to.equal(50);
+      expect(interstitial.startIsAligned, 'startIsAligned after update').to.be
+        .true;
+      expect(interstitial.appendInPlace, 'appendInPlace after update').to.be
+        .false;
+    });
   });
 
   describe('#7845 Live start following preroll', function () {

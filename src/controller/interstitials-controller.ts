@@ -2552,6 +2552,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       if (assetItem.timelineStart) {
         playerConfig.timelineOffset = assetItem.timelineStart;
       }
+    } else {
+      // Asset players are configured for the append strategy in effect when they are created.
+      // Keep it for this Interstitial should a later playlist update align its start with a segment.
+      interstitial.appendInPlace = false;
     }
     const cmcd = playerConfig.cmcd;
     if (cmcd?.sessionId && cmcd.contentId) {
