@@ -155,9 +155,15 @@ export default class GapController extends TaskLoop {
     if (!this.media?.readyState || !this.hasBuffered) {
       return;
     }
-    const currentTime = this.getCurrentTime();
-    if (this.media.currentTime < currentTime) {
-      return;
+    let currentTime = this.getCurrentTime();
+    const mediaTime = this.media.currentTime;
+    if (mediaTime < currentTime) {
+      if (!this.hls?.config.assetPlayerId) {
+        return;
+      }
+      // Asset appended in place ahead of the playhead: this is the only player attached to the media,
+      // so keep resolving stalls and holes in the ranges that are playing before its timeline offset.
+      currentTime = mediaTime;
     }
     this.poll(currentTime, this.lastCurrentTime);
     this.lastCurrentTime = currentTime;
