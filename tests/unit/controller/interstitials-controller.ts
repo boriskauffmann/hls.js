@@ -2219,6 +2219,62 @@ media_w507366714_268.ts`;
       expect(interstitials.playingIndex).to.equal(0, 'playingIndex b');
       expect(interstitials.primary.currentTime).to.equal(0, 'timelinePos b');
     });
+    it('resumes primary at the live position when joining mid-interstitial and the asset-list is empty', function () {
+      const playlist = `#EXTM3U
+#EXT-X-TARGETDURATION:10
+#EXT-X-VERSION:7
+#EXT-X-MEDIA-SEQUENCE:1
+#EXT-X-PROGRAM-DATE-TIME:2024-02-23T15:00:00.000Z
+#EXT-X-MAP:URI="fileSequence0.mp4"
+#EXTINF:10,	
+fileSequence1.mp4
+#EXTINF:10,	
+fileSequence2.mp4
+#EXT-X-DATERANGE:ID="mid-live",CLASS="com.apple.hls.interstitial",START-DATE="2024-02-23T15:00:20.000Z",DURATION=30,X-ASSET-LIST="https://example.com/empty.json"
+#EXTINF:10,	
+fileSequence3.mp4
+#EXTINF:10,	
+fileSequence4.mp4
+#EXTINF:10,	
+fileSequence5.mp4
+#EXTINF:10,	
+fileSequence6.mp4`;
+
+      setLoadedLevelDetails(playlist);
+      const interstitials = interstitialsController.interstitialsManager;
+      if (!interstitials) {
+        expect(interstitials, 'interstitialsManager').to.be.an('object');
+        return;
+      }
+      attachMediaToHls();
+      // Waiting for the asset-list of the interstitial in progress at the live start position
+      expect(interstitials.bufferingIndex).to.equal(1, 'bufferingIndex a');
+      expect(interstitials.playingIndex).to.equal(1, 'playingIndex a');
+      expect(interstitials.primary.currentTime).to.equal(30, 'timelinePos a');
+
+      // Load empty asset-list
+      hls.trigger.resetHistory();
+      const interstitial = interstitials.events[0];
+      interstitial.assetListResponse = { ASSETS: [] };
+      hls.trigger(Events.ASSET_LIST_LOADED, {
+        event: interstitial,
+        assetListResponse: interstitial.assetListResponse,
+        networkDetails: new Response('ok'),
+      });
+      expect(getTriggerCalls(), 'Actual events after asset-list').to.deep.equal(
+        [
+          Events.ASSET_LIST_LOADED,
+          Events.INTERSTITIALS_UPDATED,
+          Events.INTERSTITIALS_UPDATED,
+          Events.INTERSTITIALS_BUFFERED_TO_BOUNDARY,
+        ],
+      );
+      expect(interstitials.schedule).is.an('array').which.has.lengthOf(1);
+      expect(interstitials.playingIndex).to.equal(0, 'playingIndex b');
+      expect(interstitials.bufferingIndex).to.equal(0, 'bufferingIndex b');
+      expect(interstitials.playingItem).to.not.have.property('event');
+      expect(interstitials.primary.currentTime).to.equal(30, 'timelinePos b');
+    });
   });
 
   describe('#7845 Live start following preroll', function () {
