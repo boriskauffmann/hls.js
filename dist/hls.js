@@ -12489,6 +12489,11 @@
         // Remove the tolerance if it would put the bufferEnd past the actual end of stream
         // Uses buffer and sequence number to calculate switch segment (required if using EXT-X-DISCONTINUITY-SEQUENCE)
         frag = findFragmentByPTS(fragPrevious, fragments, bufferEnd, lookupTolerance);
+        if (lookupTolerance && frag && frag.start > bufferEnd && !this.filterReplacedPrimary(frag, levelDetails)) {
+          // The tolerance skipped the end of a fragment and selected one that will not be loaded
+          // (replaced by an Interstitial). Load up to the Interstitial boundary instead.
+          frag = findFragmentByPTS(fragPrevious, fragments, bufferEnd, 0);
+        }
       } else {
         // reach end of playlist
         frag = fragments[fragments.length - 1];
@@ -32271,6 +32276,7 @@
       _this.endedAsset = null;
       _this.bufferingAsset = null;
       _this.bufferPastEdge = false;
+      _this.primaryLoadStart = -1;
       _this.shouldPlay = false;
       _this.onPlay = function () {
         _this.shouldPlay = true;
@@ -32620,6 +32626,7 @@
     };
     _proto.clearScheduleState = function clearScheduleState() {
       this.log("clear schedule state");
+      this.primaryLoadStart = -1;
       this.playingItem = this.bufferingItem = this.waitingItem = this.endedItem = this.playingAsset = this.endedAsset = this.bufferingAsset = null;
     };
     _proto.onMediaDetaching = function onMediaDetaching(event, data) {
@@ -33037,6 +33044,7 @@
         if (!this.eventItemsMatch(scheduledItem, waitingItem || currentItem)) {
           this.waitingItem = scheduledItem;
           this.log("INTERSTITIAL_STARTED " + segmentToString(scheduledItem) + " " + (interstitial.appendInPlace ? 'append in place' : ''));
+          this.primaryLoadStart = -1;
           interstitial.hasPlayed = false;
           this.hls.trigger(Events.INTERSTITIAL_STARTED, {
             event: interstitial,
@@ -33220,13 +33228,21 @@
       this.log("Start loading primary @" + bufferPos + " bufferedPos: " + this.bufferedPos + " startPosition: " + startPosition + " skip seek: " + skipSeekToStartPosition + " has enough " + hasEnoughToStart + " loadingEnabled: " + loadingEnabled + " bufferingEnabled: " + bufferingEnabled);
       if (!skipSeekToStartPosition && hasEnoughToStart || !loadingEnabled || Math.abs(startPosition - bufferPos) > 0.1) {
         var details = this.primaryDetails;
+        var primaryLoadStart = this.primaryLoadStart;
+        if (details != null && details.live && loadingEnabled && bufferingEnabled && primaryLoadStart >= 0 && bufferPos >= primaryLoadStart - 0.1) {
+          // Live primary is already loading from the resumption point behind an in-place Interstitial.
+          // Restarting it would abort the part in flight and leave holes in the buffer.
+          return;
+        }
         if (details != null && details.live && bufferPos + 0.5 >= details.edge) {
           var bufferingItem = this.bufferingItem;
           this.log("Resume primary loading when live passes " + bufferPos + " buffering item: " + (bufferingItem ? segmentToString(bufferingItem) : null));
           hls.pauseBuffering();
           this.bufferPastEdge = true;
+          this.primaryLoadStart = -1;
           return;
         }
+        this.primaryLoadStart = details != null && details.live ? bufferPos : -1;
         hls.startLoad(bufferPos, skipSeekToStartPosition);
       } else if (!bufferingEnabled) {
         hls.resumeBuffering();
@@ -33280,7 +33296,8 @@
           if (primaryWaiting) {
             var playingItem = this.playingItem;
             var skipSeekToStartPosition = this.isInterstitial(playingItem) && playingItem.event.appendInPlace;
-            this.hls.startLoad(Math.max(bufferedPos, bufferingItem.start), skipSeekToStartPosition);
+            this.primaryLoadStart = Math.max(bufferedPos, bufferingItem.start);
+            this.hls.startLoad(this.primaryLoadStart, skipSeekToStartPosition);
           } else {
             var bufferingPlayer = this.getBufferingPlayer();
             if (bufferingPlayer) {
@@ -33503,6 +33520,14 @@
           if (this.primaryLive && details && bufferEnd > details.edge - details.targetduration && nextItemToBuffer.start < details.edge + this.hls.config.interstitialLiveLookAhead && this.isInterstitial(nextItemToBuffer)) {
             this.preloadAssets(nextItemToBuffer.event, 0);
           }
+        }
+      } else if (this.bufferedPos === bufferEnd && bufferingItem && !this.isInterstitial(bufferingItem) && this.itemsMatch(bufferingItem, playingItem)) {
+        // A Playlist update added an in-place Interstitial that starts where primary is already buffered to.
+        // Start buffering it now rather than when playback stalls at its boundary.
+        var nextIndex = this.findItemIndex(bufferingItem) + 1;
+        var nextItem = items[nextIndex];
+        if (nextItem && this.isInterstitial(nextItem) && nextItem.event.appendInPlace && !nextItem.event.hasPlayed && bufferEnd + 0.01 >= nextItem.start && bufferEnd < nextItem.end) {
+          this.bufferedToItem(nextItem);
         }
       } else if (bufferIsEmpty && playingItem && !this.itemsMatch(playingItem, bufferingItem)) {
         if (bufferEndIndex === playingIndex) {
