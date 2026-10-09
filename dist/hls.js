@@ -33243,6 +33243,7 @@
           return;
         }
         this.primaryLoadStart = details != null && details.live ? bufferPos : -1;
+        this.bufferPastEdge = false;
         hls.startLoad(bufferPos, skipSeekToStartPosition);
       } else if (!bufferingEnabled) {
         hls.resumeBuffering();
