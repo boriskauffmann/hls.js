@@ -1713,6 +1713,7 @@ export default class InterstitialsController
         return;
       }
       this.primaryLoadStart = details?.live ? bufferPos : -1;
+      this.bufferPastEdge = false;
       hls.startLoad(bufferPos, skipSeekToStartPosition);
     } else if (!bufferingEnabled) {
       hls.resumeBuffering();
