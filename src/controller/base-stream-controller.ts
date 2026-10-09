@@ -1940,6 +1940,16 @@ export default class BaseStreamController
         bufferEnd,
         lookupTolerance,
       );
+      if (
+        lookupTolerance &&
+        frag &&
+        frag.start > bufferEnd &&
+        !this.filterReplacedPrimary(frag, levelDetails)
+      ) {
+        // The tolerance skipped the end of a fragment and selected one that will not be loaded
+        // (replaced by an Interstitial). Load up to the Interstitial boundary instead.
+        frag = findFragmentByPTS(fragPrevious, fragments, bufferEnd, 0);
+      }
     } else {
       // reach end of playlist
       frag = fragments[fragments.length - 1];
